@@ -1,0 +1,454 @@
+//@version=6
+indicator("XAU/USD 5M Volume Profile + VWAP Signals", overlay=true)
+
+// =====================================================
+// SETTINGS
+// =====================================================
+
+profileLength = input.int(100, "Volume Profile Length", minval=20)
+volumeLength = input.int(20, "Average Volume Length", minval=5)
+
+volumeMultiplier = input.float(
+     1.5,
+     "Volume Multiplier",
+     minval=1.0,
+     step=0.1
+)
+
+levelTolerance = input.float(
+     0.15,
+     "Level Tolerance %",
+     minval=0.01,
+     step=0.01
+)
+
+rr1 = input.float(
+     1.0,
+     "TP1 Risk/Reward",
+     minval=0.5,
+     step=0.5
+)
+
+rr2 = input.float(
+     2.0,
+     "TP2 Risk/Reward",
+     minval=1.0,
+     step=0.5
+)
+
+swingLength = input.int(
+     10,
+     "Swing Length",
+     minval=2
+)
+
+atrLength = input.int(
+     14,
+     "ATR Length",
+     minval=5
+)
+
+atrMultiplier = input.float(
+     1.0,
+     "ATR Stop Multiplier",
+     minval=0.1,
+     step=0.1
+)
+
+// =====================================================
+// VWAP
+// =====================================================
+
+vwapValue = ta.vwap(hlc3)
+
+// =====================================================
+// VOLUME
+// =====================================================
+
+averageVolume = ta.sma(
+     volume,
+     volumeLength
+)
+
+volumeRatio = (
+     averageVolume > 0
+     ? volume / averageVolume
+     : 0
+)
+
+highVolume = (
+     volumeRatio >= volumeMultiplier
+)
+
+// =====================================================
+// APPROXIMATE VOLUME PROFILE
+// =====================================================
+//
+// TradingView Pine Script-in məhdudiyyətlərinə görə
+// burada rolling price/volume distribution istifadə olunur.
+//
+// POC = ən yüksək volume weighted price
+// VAH / VAL = POC ətrafında value area
+// =====================================================
+
+profileHigh = ta.highest(
+     high,
+     profileLength
+)
+
+profileLow = ta.lowest(
+     low,
+     profileLength
+)
+
+profileRange = (
+     profileHigh - profileLow
+)
+
+// Sadələşdirilmiş POC hesablaması.
+// Hər candle üçün typical price * volume
+// əsaslı rolling weighted price.
+
+weightedPrice = (
+     hlc3 * volume
+)
+
+totalProfileVolume = (
+     ta.sum(
+         volume,
+         profileLength
+     )
+)
+
+poc = (
+     totalProfileVolume > 0
+     ? ta.sum(
+         weightedPrice,
+         profileLength
+       ) / totalProfileVolume
+     : hlc3
+)
+
+// Value Area üçün təxmini sərhədlər.
+// 70% value area POC ətrafında yerləşdirilir.
+
+valueAreaRange = (
+     profileRange * 0.35
+)
+
+vah = poc + valueAreaRange
+val = poc - valueAreaRange
+
+// =====================================================
+// PRICE PROXIMITY
+// =====================================================
+
+tolerance = (
+     close * levelTolerance / 100
+)
+
+nearPOC = (
+     math.abs(close - poc)
+     <= tolerance
+)
+
+nearVAH = (
+     math.abs(close - vah)
+     <= tolerance
+)
+
+nearVAL = (
+     math.abs(close - val)
+     <= tolerance
+)
+
+// =====================================================
+// CANDLE CONFIRMATION
+// =====================================================
+
+bullishCandle = (
+     close > open
+     and close > close[1]
+)
+
+bearishCandle = (
+     close < open
+     and close < close[1]
+)
+
+// =====================================================
+// SWING LEVELS
+// =====================================================
+
+swingLow = ta.lowest(
+     low,
+     swingLength
+)
+
+swingHigh = ta.highest(
+     high,
+     swingLength
+)
+
+// =====================================================
+// ATR
+// =====================================================
+
+atr = ta.atr(
+     atrLength
+)
+
+// =====================================================
+// LONG CONDITION
+// =====================================================
+
+longCondition = (
+     barstate.isconfirmed
+     and close > vwapValue
+     and highVolume
+     and bullishCandle
+     and (
+         nearVAL
+         or nearPOC
+     )
+)
+
+// =====================================================
+// SHORT CONDITION
+// =====================================================
+
+shortCondition = (
+     barstate.isconfirmed
+     and close < vwapValue
+     and highVolume
+     and bearishCandle
+     and (
+         nearVAH
+         or nearPOC
+     )
+)
+
+// =====================================================
+// LONG LEVELS
+// =====================================================
+
+longEntry = close
+
+longSL = (
+     math.min(
+         swingLow,
+         val
+     )
+     - atr * atrMultiplier
+)
+
+longRisk = (
+     longEntry - longSL
+)
+
+longTP1 = (
+     longEntry
+     + longRisk * rr1
+)
+
+longTP2 = (
+     longEntry
+     + longRisk * rr2
+)
+
+// =====================================================
+// SHORT LEVELS
+// =====================================================
+
+shortEntry = close
+
+shortSL = (
+     math.max(
+         swingHigh,
+         vah
+     )
+     + atr * atrMultiplier
+)
+
+shortRisk = (
+     shortSL - shortEntry
+)
+
+shortTP1 = (
+     shortEntry
+     - shortRisk * rr1
+)
+
+shortTP2 = (
+     shortEntry
+     - shortRisk * rr2
+)
+
+// =====================================================
+// PLOTS
+// =====================================================
+
+plot(
+     vwapValue,
+     title="VWAP",
+     color=color.orange,
+     linewidth=2
+)
+
+plot(
+     poc,
+     title="POC",
+     color=color.yellow,
+     linewidth=2
+)
+
+plot(
+     vah,
+     title="VAH",
+     color=color.red,
+     linewidth=1
+)
+
+plot(
+     val,
+     title="VAL",
+     color=color.green,
+     linewidth=1
+)
+
+// =====================================================
+// SIGNAL MARKERS
+// =====================================================
+
+plotshape(
+     longCondition,
+     title="LONG",
+     style=shape.labelup,
+     location=location.belowbar,
+     text="LONG",
+     color=color.green,
+     textcolor=color.white,
+     size=size.small
+)
+
+plotshape(
+     shortCondition,
+     title="SHORT",
+     style=shape.labeldown,
+     location=location.abovebar,
+     text="SHORT",
+     color=color.red,
+     textcolor=color.white,
+     size=size.small
+)
+
+// =====================================================
+// ALERT JSON - LONG
+// =====================================================
+
+longMessage = (
+     '{"symbol":"' +
+     syminfo.ticker +
+     '",' +
+     '"timeframe":"' +
+     timeframe.period +
+     '",' +
+     '"side":"LONG",' +
+     '"entry":' +
+     str.tostring(longEntry, format.mintick) +
+     ',' +
+     '"sl":' +
+     str.tostring(longSL, format.mintick) +
+     ',' +
+     '"tp1":' +
+     str.tostring(longTP1, format.mintick) +
+     ',' +
+     '"tp2":' +
+     str.tostring(longTP2, format.mintick) +
+     ',' +
+     '"poc":' +
+     str.tostring(poc, format.mintick) +
+     ',' +
+     '"vah":' +
+     str.tostring(vah, format.mintick) +
+     ',' +
+     '"val":' +
+     str.tostring(val, format.mintick) +
+     ',' +
+     '"vwap":' +
+     str.tostring(vwapValue, format.mintick) +
+     ',' +
+     '"volume_ratio":' +
+     str.tostring(volumeRatio, "#.##") +
+     '}'
+)
+
+// =====================================================
+// ALERT JSON - SHORT
+// =====================================================
+
+shortMessage = (
+     '{"symbol":"' +
+     syminfo.ticker +
+     '",' +
+     '"timeframe":"' +
+     timeframe.period +
+     '",' +
+     '"side":"SHORT",' +
+     '"entry":' +
+     str.tostring(shortEntry, format.mintick) +
+     ',' +
+     '"sl":' +
+     str.tostring(shortSL, format.mintick) +
+     ',' +
+     '"tp1":' +
+     str.tostring(shortTP1, format.mintick) +
+     ',' +
+     '"tp2":' +
+     str.tostring(shortTP2, format.mintick) +
+     ',' +
+     '"poc":' +
+     str.tostring(poc, format.mintick) +
+     ',' +
+     '"vah":' +
+     str.tostring(vah, format.mintick) +
+     ',' +
+     '"val":' +
+     str.tostring(val, format.mintick) +
+     ',' +
+     '"vwap":' +
+     str.tostring(vwapValue, format.mintick) +
+     ',' +
+     '"volume_ratio":' +
+     str.tostring(volumeRatio, "#.##") +
+     '}'
+)
+
+// =====================================================
+// ALERT CONDITIONS
+// =====================================================
+
+alertcondition(
+     longCondition,
+     title="XAUUSD LONG",
+     message="XAUUSD LONG signal"
+)
+
+alertcondition(
+     shortCondition,
+     title="XAUUSD SHORT",
+     message="XAUUSD SHORT signal"
+)
+
+// Dynamic alerts
+if longCondition
+    alert(
+         longMessage,
+         alert.freq_once_per_bar_close
+    )
+
+if shortCondition
+    alert(
+         shortMessage,
+         alert.freq_once_per_bar_close
+    )
